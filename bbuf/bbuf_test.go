@@ -20,11 +20,7 @@ func Test_ReadMyWrites(t *testing.T) {
 		t.Fatalf("b.Commit: %v", err)
 	}
 
-	r, err := b.Read()
-	if err != nil {
-		t.Fatalf("b.Read: %v", err)
-	}
-
+	r := b.Read()
 	if got, want := r, "abcd"; !bytes.Equal(got, []byte(want)) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
