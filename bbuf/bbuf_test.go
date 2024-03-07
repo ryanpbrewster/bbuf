@@ -237,3 +237,27 @@ func Test_WritesDontClobberReads(t *testing.T) {
 		t.Fatalf("b.Reserve: %v", err)
 	}
 }
+
+func Test_ReadsDoNotSeeUncommittedWrites(t *testing.T) {
+	b := bbuf.New(10)
+
+	payload := bytes.Repeat([]byte("a"), 3)
+	w, err := b.Reserve(len(payload))
+	if err != nil {
+		t.Fatalf("b.Reserve: %v", err)
+	}
+
+	// The write hasn't even been performed yet, we don't want to see unitialized data
+	if r := b.Read(); r != nil {
+		t.Fatalf("b.Read should be nil, got %+v", r)
+	}
+
+	copy(w, payload)
+	b.Commit(len(payload))
+
+	// Now that the write has been committed we can read it.
+	r := b.Read()
+	if got, want := r.Bytes, payload; !bytes.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}

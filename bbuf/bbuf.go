@@ -68,12 +68,12 @@ func (b *Buffer) Commit(sz int) error {
 	return nil
 }
 
-type Read struct {
+type Lease struct {
 	Bytes []byte
 	end   int
 }
 
-func (b *Buffer) Read() *Read {
+func (b *Buffer) Read() *Lease {
 	start, end := b.read, b.write
 	if b.write < b.read {
 		// We are inverted.
@@ -88,10 +88,10 @@ func (b *Buffer) Read() *Read {
 	if start == end {
 		return nil
 	}
-	return &Read{Bytes: b.buf[start:end], end: end}
+	return &Lease{Bytes: b.buf[start:end], end: end}
 }
 
-func (b *Buffer) Release(r *Read) error {
+func (b *Buffer) Release(r *Lease) error {
 	b.read = r.end
 	return nil
 }
