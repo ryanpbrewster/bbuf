@@ -29,3 +29,102 @@ func Test_ReadMyWrites(t *testing.T) {
 		t.Fatalf("b.Release: %v", err)
 	}
 }
+
+func Test_InterleavedReadsAndWrites(t *testing.T) {
+	b := bbuf.New(10)
+
+	// Write 4 bytes
+	w1, err := b.Reserve(4)
+	if err != nil {
+		t.Fatalf("b.Reserve: %v", err)
+	}
+	copy(w1, []byte("aaaa"))
+	if err := b.Commit(4); err != nil {
+		t.Fatalf("b.Commit: %v", err)
+	}
+
+	// Read 4 bytes, but don't release it yet
+	r1 := b.Read()
+
+	w2, err := b.Reserve(4)
+	if err != nil {
+		t.Fatalf("b.Reserve: %v", err)
+	}
+	copy(w2, []byte("bbbb"))
+	if err := b.Commit(4); err != nil {
+		t.Fatalf("b.Commit: %v", err)
+	}
+
+	// Now check r1 after we're written new data. It should still be valid.
+	if got, want := r1, []byte("aaaa"); !bytes.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if err := b.Release(4); err != nil {
+		t.Fatalf("b.Release: %v", err)
+	}
+
+	// And another read should see "bbbb"
+	r2 := b.Read()
+	if got, want := r2, []byte("bbbb"); !bytes.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if err := b.Release(4); err != nil {
+		t.Fatalf("b.Release: %v", err)
+	}
+}
+
+func Test_Wraparound(t *testing.T) {
+	b := bbuf.New(10)
+
+	// Write & release 5 bytes
+	w1, err := b.Reserve(5)
+	if err != nil {
+		t.Fatalf("b.Reserve: %v", err)
+	}
+	copy(w1, []byte("aaaaa"))
+	if err := b.Commit(4); err != nil {
+		t.Fatalf("b.Commit: %v", err)
+	}
+	r1 := b.Read()
+	if got, want := r1, []byte("aaaaa"); !bytes.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if err := b.Release(len(r1)); err != nil {
+		t.Fatalf("b.Release: %v", err)
+	}
+
+	// Now write 4 bytes, twice. That should wrap us around the end of the buffer.
+	w2, err := b.Reserve(4)
+	if err != nil {
+		t.Fatalf("b.Reserve: %v", err)
+	}
+	copy(w2, []byte("bbbb"))
+	if err := b.Commit(4); err != nil {
+		t.Fatalf("b.Commit: %v", err)
+	}
+	w3, err := b.Reserve(4)
+	if err != nil {
+		t.Fatalf("b.Reserve: %v", err)
+	}
+	copy(w3, []byte("cccc"))
+	if err := b.Commit(4); err != nil {
+		t.Fatalf("b.Commit: %v", err)
+	}
+
+	// Because it wrapped around, the reads will necessarily be split.
+	r2 := b.Read()
+	if got, want := r2, []byte("bbbb"); !bytes.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if err := b.Release(len(r2)); err != nil {
+		t.Fatalf("b.Release: %v", err)
+	}
+
+	r3 := b.Read()
+	if got, want := r3, []byte("cccc"); !bytes.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if err := b.Release(len(r3)); err != nil {
+		t.Fatalf("b.Release: %v", err)
+	}
+}

@@ -50,8 +50,9 @@ func (b *Buffer) Reserve(sz int) ([]byte, error) {
 			b.write += sz
 			// We have the space!
 			return b.buf[start:b.write], nil
-		} else if sz < b.read {
+		} else if sz <= b.read {
 			// We don't have space here, but we have enough at the start. Time to invert.
+			b.end = b.write
 			b.write = sz
 			return b.buf[0:b.write], nil
 		} else {
@@ -72,11 +73,13 @@ func (b *Buffer) Read() []byte {
 		// We are inverted.
 		// We should read until b.end
 		end = b.end
+		b.read = 0
+	} else {
+		b.read = end
 	}
 	if start == end {
 		return nil
 	}
-	b.read = end
 	return b.buf[start:end]
 }
 
