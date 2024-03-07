@@ -24,11 +24,11 @@ func Test_ReadMyWrites(t *testing.T) {
 	}
 
 	r := b.Read()
-	if got, want := r, "abcd"; !bytes.Equal(got, []byte(want)) {
+	if got, want := r.Bytes, "abcd"; !bytes.Equal(got, []byte(want)) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 
-	if err := b.Release(4); err != nil {
+	if err := b.Release(r); err != nil {
 		t.Fatalf("b.Release: %v", err)
 	}
 }
@@ -59,19 +59,19 @@ func Test_InterleavedReadsAndWrites(t *testing.T) {
 	}
 
 	// Now check r1 after we're written new data. It should still be valid.
-	if got, want := r1, []byte("aaaa"); !bytes.Equal(got, want) {
+	if got, want := r1.Bytes, []byte("aaaa"); !bytes.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	if err := b.Release(4); err != nil {
+	if err := b.Release(r1); err != nil {
 		t.Fatalf("b.Release: %v", err)
 	}
 
 	// And another read should see "bbbb"
 	r2 := b.Read()
-	if got, want := r2, []byte("bbbb"); !bytes.Equal(got, want) {
+	if got, want := r2.Bytes, []byte("bbbb"); !bytes.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	if err := b.Release(4); err != nil {
+	if err := b.Release(r2); err != nil {
 		t.Fatalf("b.Release: %v", err)
 	}
 }
@@ -89,10 +89,10 @@ func Test_Wraparound(t *testing.T) {
 		t.Fatalf("b.Commit: %v", err)
 	}
 	r1 := b.Read()
-	if got, want := r1, []byte("aaaaa"); !bytes.Equal(got, want) {
+	if got, want := r1.Bytes, []byte("aaaaa"); !bytes.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	if err := b.Release(len(r1)); err != nil {
+	if err := b.Release(r1); err != nil {
 		t.Fatalf("b.Release: %v", err)
 	}
 
@@ -116,18 +116,18 @@ func Test_Wraparound(t *testing.T) {
 
 	// Because it wrapped around, the reads will necessarily be split.
 	r2 := b.Read()
-	if got, want := r2, []byte("bbbb"); !bytes.Equal(got, want) {
+	if got, want := r2.Bytes, []byte("bbbb"); !bytes.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	if err := b.Release(len(r2)); err != nil {
+	if err := b.Release(r2); err != nil {
 		t.Fatalf("b.Release: %v", err)
 	}
 
 	r3 := b.Read()
-	if got, want := r3, []byte("cccc"); !bytes.Equal(got, want) {
+	if got, want := r3.Bytes, []byte("cccc"); !bytes.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	if err := b.Release(len(r3)); err != nil {
+	if err := b.Release(r3); err != nil {
 		t.Fatalf("b.Release: %v", err)
 	}
 }
@@ -150,9 +150,11 @@ func Test_OutOfSpace_EdgeCases(t *testing.T) {
 	if err := b.Commit(len(w1)); err != nil {
 		t.Fatalf("b.Commit: %v", err)
 	}
-	if got, want := b.Read(), payload1; !bytes.Equal(got, want) {
+	r1 := b.Read()
+	if got, want := r1.Bytes, payload1; !bytes.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
+	b.Release(r1)
 
 	// But now the buffer is "split" and you can't write 9/10 again
 	if _, err := b.Reserve(9); err == nil {
@@ -171,9 +173,13 @@ func Test_Write1kEntries(t *testing.T) {
 	expected := new(bytes.Buffer)
 
 	drain := func() {
-		for r := b.Read(); r != nil; r = b.Read() {
-			actual.Write(r)
-			b.Release(len(r))
+		for {
+			r := b.Read()
+			if r == nil {
+				return
+			}
+			actual.Write(r.Bytes)
+			b.Release(r)
 		}
 	}
 
@@ -221,10 +227,10 @@ func Test_WritesDontClobberReads(t *testing.T) {
 	}
 
 	// For example, we might want to use our live read like this:
-	if got, want := r, payload; !bytes.Equal(got, want) {
+	if got, want := r.Bytes, payload; !bytes.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	b.Release(len(r))
+	b.Release(r)
 
 	// _Now_ we can reserve 5 bytes
 	if _, err := b.Reserve(5); err != nil {

@@ -68,7 +68,12 @@ func (b *Buffer) Commit(sz int) error {
 	return nil
 }
 
-func (b *Buffer) Read() []byte {
+type Read struct {
+	Bytes []byte
+	end   int
+}
+
+func (b *Buffer) Read() *Read {
 	start, end := b.read, b.write
 	if b.write < b.read {
 		// We are inverted.
@@ -80,14 +85,13 @@ func (b *Buffer) Read() []byte {
 			start = 0
 		}
 	}
-	b.read = end
 	if start == end {
 		return nil
 	}
-	return b.buf[start:end]
+	return &Read{Bytes: b.buf[start:end], end: end}
 }
 
-func (b *Buffer) Release(sz int) error {
-	// do nothing?
+func (b *Buffer) Release(r *Read) error {
+	b.read = r.end
 	return nil
 }
