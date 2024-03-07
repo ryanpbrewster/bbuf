@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/rand"
 	"testing"
 
 	"rpb.dev/bbufsink/bbuf"
@@ -173,10 +174,13 @@ func Test_Write1kEntries(t *testing.T) {
 		for r := b.Read(); r != nil; r = b.Read() {
 			actual.Write(r)
 			b.Release(len(r))
+			fmt.Printf("[RPB] drained: %+v\n", b)
 		}
 	}
+
+	prng := rand.NewSource(42)
 	for i := 0; i < 1_000; i++ {
-		payload := []byte(fmt.Sprintf("payload-%d\n", i))
+		payload := []byte(fmt.Sprintf("payload-%d\n", prng.Int63()))
 		expected.Write(payload)
 
 		w, err := b.Reserve(len(payload))
@@ -185,21 +189,17 @@ func Test_Write1kEntries(t *testing.T) {
 			w, err = b.Reserve(len(payload))
 		}
 		if err != nil {
-			t.Fatalf("b.Reserve(%d): %v", len(payload), err)
+			t.Fatalf("b.Reserve(%d): %v (%+v)", len(payload), err, b)
 		}
 		copy(w, payload)
+		fmt.Printf("[RPB] wrote %s: %+v\n", string(payload), b)
 		if err := b.Commit(len(payload)); err != nil {
 			t.Fatalf("b.Commit: %v", err)
 		}
 	}
-	fmt.Printf("[RPB] done buffering: %+v\n", b)
 	drain()
-	fmt.Printf("[RPB] final drain: %+v\n", b)
 
 	if got, want := actual.String(), expected.String(); got != want {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	if got, want := actual.Len(), expected.Len(); got != want {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }

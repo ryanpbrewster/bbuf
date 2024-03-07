@@ -52,6 +52,7 @@ func (b *Buffer) Reserve(sz int) ([]byte, error) {
 			return b.buf[start:b.write], nil
 		} else if sz < b.read {
 			// We don't have space here, but we have enough at the start. Time to invert.
+			fmt.Printf("[RPB] inverting @ %d\n", b.write)
 			b.watermark = b.write
 			b.write = sz
 			return b.buf[0:b.write], nil
