@@ -2,6 +2,8 @@ package bbuf_test
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"testing"
 
 	"rpb.dev/bbufsink/bbuf"
@@ -159,5 +161,45 @@ func Test_OutOfSpace_EdgeCases(t *testing.T) {
 	// 8/10 is allowed
 	if _, err := b.Reserve(8); err != nil {
 		t.Fatalf("b.Reserve: %v", err)
+	}
+}
+
+func Test_Write1kEntries(t *testing.T) {
+	b := bbuf.New(37)
+	actual := new(bytes.Buffer)
+	expected := new(bytes.Buffer)
+
+	drain := func() {
+		for r := b.Read(); r != nil; r = b.Read() {
+			actual.Write(r)
+			b.Release(len(r))
+		}
+	}
+	for i := 0; i < 1_000; i++ {
+		payload := []byte(fmt.Sprintf("payload-%d\n", i))
+		expected.Write(payload)
+
+		w, err := b.Reserve(len(payload))
+		if errors.Is(err, bbuf.ErrNotEnoughSpace) {
+			drain()
+			w, err = b.Reserve(len(payload))
+		}
+		if err != nil {
+			t.Fatalf("b.Reserve(%d): %v", len(payload), err)
+		}
+		copy(w, payload)
+		if err := b.Commit(len(payload)); err != nil {
+			t.Fatalf("b.Commit: %v", err)
+		}
+	}
+	fmt.Printf("[RPB] done buffering: %+v\n", b)
+	drain()
+	fmt.Printf("[RPB] final drain: %+v\n", b)
+
+	if got, want := actual.String(), expected.String(); got != want {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if got, want := actual.Len(), expected.Len(); got != want {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }

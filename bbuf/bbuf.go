@@ -14,17 +14,17 @@ type Buffer struct {
 	// where the next read will start
 	read int
 
-	// if inverted, this is the end of the written data
+	// if inverted, this is the watermark of the written data
 	// if not inverted, this is len(buf)
-	end int
+	watermark int
 }
 
 func New(sz int) *Buffer {
 	return &Buffer{
-		buf:   make([]byte, sz),
-		write: 0,
-		read:  0,
-		end:   sz,
+		buf:       make([]byte, sz),
+		write:     0,
+		read:      0,
+		watermark: sz,
 	}
 }
 
@@ -52,7 +52,7 @@ func (b *Buffer) Reserve(sz int) ([]byte, error) {
 			return b.buf[start:b.write], nil
 		} else if sz < b.read {
 			// We don't have space here, but we have enough at the start. Time to invert.
-			b.end = b.write
+			b.watermark = b.write
 			b.write = sz
 			return b.buf[0:b.write], nil
 		} else {
@@ -71,12 +71,15 @@ func (b *Buffer) Read() []byte {
 	start, end := b.read, b.write
 	if b.write < b.read {
 		// We are inverted.
-		// We should read until b.end
-		end = b.end
-		b.read = 0
-	} else {
-		b.read = end
+		if start < b.watermark {
+			// If there is data available, we should read until b.watermark
+			end = b.watermark
+		} else {
+			// If there's no data, skip to reading from the front of the buf
+			start = 0
+		}
 	}
+	b.read = end
 	if start == end {
 		return nil
 	}
