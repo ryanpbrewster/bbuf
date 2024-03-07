@@ -78,42 +78,36 @@ func Test_InterleavedReadsAndWrites(t *testing.T) {
 	}
 }
 
-func Test_Wraparound(t *testing.T) {
+func Test_Wraparound_SplitsReads(t *testing.T) {
+	// We're going to set up a scenario such that there is both normal and inverted data.
+	// Such scenarios require two reads.
 	b := bbuf.New(10)
 
-	// Write & release 5 bytes
-	w1 := b.Reserve(5)
-	if w1 == nil {
+	// Write 5 bytes
+	if w := b.Reserve(5); w == nil {
 		t.Fatalf("b.Reserve returned nil")
-	}
-	copy(w1.Bytes, []byte("aaaaa"))
-	if err := b.Commit(w1); err != nil {
-		t.Fatalf("b.Commit: %v", err)
-	}
-	r1 := b.Read()
-	if got, want := r1.Bytes, []byte("aaaaa"); !bytes.Equal(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	if err := b.Release(r1); err != nil {
-		t.Fatalf("b.Release: %v", err)
+	} else {
+		copy(w.Bytes, []byte("aaaaa"))
+		b.Commit(w)
 	}
 
-	// Now write 4 bytes, twice. That should wrap us around the end of the buffer.
-	w2 := b.Reserve(4)
-	if w2 == nil {
+	// Now write 4 bytes. We need some trickery to ensure that we
+	// can release the first 5 bytes.
+	r1 := b.Read()
+	if w2 := b.Reserve(4); w2 == nil {
 		t.Fatalf("b.Reserve returned nil")
+	} else {
+		copy(w2.Bytes, []byte("bbbb"))
+		b.Commit(w2)
 	}
-	copy(w2.Bytes, []byte("bbbb"))
-	if err := b.Commit(w2); err != nil {
-		t.Fatalf("b.Commit: %v", err)
-	}
-	w3 := b.Reserve(4)
-	if w3 == nil {
+	b.Release(r1)
+
+	// Finally, write 4 more bytes. These will be inverted.
+	if w3 := b.Reserve(4); w3 == nil {
 		t.Fatalf("b.Reserve returned nil")
-	}
-	copy(w3.Bytes, []byte("cccc"))
-	if err := b.Commit(w3); err != nil {
-		t.Fatalf("b.Commit: %v", err)
+	} else {
+		copy(w3.Bytes, []byte("cccc"))
+		b.Commit(w3)
 	}
 
 	// Because it wrapped around, the reads will necessarily be split.
@@ -157,15 +151,48 @@ func Test_OutOfSpace_EdgeCases(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 	b.Release(r1)
+}
 
-	// But now the buffer is "split" and you can't write 9/10 again
-	if w := b.Reserve(9); w != nil {
-		t.Fatalf("b.Reserve: expected nil, got %+v", w)
+func Test_SplitBuffer_OutOfSpace(t *testing.T) {
+	// Here we're going to put a buffer into a position where there's inconveniently located data
+	// in the middle, which prevents large blobs from being written.
+
+	// In particular, we're going to ensure that a length-5 buffer has a single byte right in the middle
+	// [0 1 2 3 4]
+	// [_ _ x _ _]
+	b := bbuf.New(5)
+
+	if w := b.Reserve(2); w != nil {
+		b.Commit(w)
+	} else {
+		t.Fatalf("b.Reserve(2) returned nil")
 	}
 
-	// 8/10 is allowed
-	if w := b.Reserve(8); w == nil {
-		t.Fatalf("b.Reserve: returned nil")
+	r := b.Read()
+
+	if w := b.Reserve(1); w != nil {
+		b.Commit(w)
+	} else {
+		t.Fatalf("b.Reserve(2) returned nil")
+	}
+
+	b.Release(r)
+
+	// Now we have a single unread byte dead center
+	r = b.Read()
+	if got, want := len(r.Bytes), 1; got != want {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+
+	// Because it's very inconveniently located, until we finish reading it we can't allocate 3 contiguous bytes
+	if w := b.Reserve(3); w != nil {
+		t.Fatalf("b.Reserve(3) should return nil, got %v", w)
+	}
+
+	// Once we release it we can allocate the space
+	b.Release(r)
+	if w := b.Reserve(3); w == nil {
+		t.Fatalf("b.Reserve(3) should not return nil")
 	}
 }
 

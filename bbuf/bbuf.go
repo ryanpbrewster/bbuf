@@ -93,6 +93,10 @@ func (b *Buffer) Read() *Lease {
 }
 
 func (b *Buffer) Release(r *Lease) error {
-	b.read = r.end
+	if r.end == b.write {
+		b.read, b.write = 0, 0
+	} else {
+		b.read = r.end
+	}
 	return nil
 }
