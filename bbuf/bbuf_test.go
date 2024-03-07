@@ -128,3 +128,36 @@ func Test_Wraparound(t *testing.T) {
 		t.Fatalf("b.Release: %v", err)
 	}
 }
+
+func Test_OutOfSpace_EdgeCases(t *testing.T) {
+	b := bbuf.New(10)
+
+	// We don't allow completely filling the buffer
+	if _, err := b.Reserve(10); err == nil {
+		t.Fatalf("b.Reserve: expected err")
+	}
+
+	// 9/10 is allowed
+	w1, err := b.Reserve(9)
+	if err != nil {
+		t.Fatalf("b.Reserve: %v", err)
+	}
+	payload1 := bytes.Repeat([]byte("a"), len(w1))
+	copy(w1, payload1)
+	if err := b.Commit(len(w1)); err != nil {
+		t.Fatalf("b.Commit: %v", err)
+	}
+	if got, want := b.Read(), payload1; !bytes.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+
+	// But now the buffer is "split" and you can't write 9/10 again
+	if _, err := b.Reserve(9); err == nil {
+		t.Fatalf("b.Reserve: expected err")
+	}
+
+	// 8/10 is allowed
+	if _, err := b.Reserve(8); err != nil {
+		t.Fatalf("b.Reserve: %v", err)
+	}
+}
