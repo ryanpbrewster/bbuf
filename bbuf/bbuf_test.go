@@ -166,7 +166,7 @@ func Test_OutOfSpace_EdgeCases(t *testing.T) {
 }
 
 func Test_Write1kEntries(t *testing.T) {
-	b := bbuf.New(37)
+	b := bbuf.New(97)
 	actual := new(bytes.Buffer)
 	expected := new(bytes.Buffer)
 
@@ -174,7 +174,6 @@ func Test_Write1kEntries(t *testing.T) {
 		for r := b.Read(); r != nil; r = b.Read() {
 			actual.Write(r)
 			b.Release(len(r))
-			fmt.Printf("[RPB] drained: %+v\n", b)
 		}
 	}
 
@@ -192,7 +191,6 @@ func Test_Write1kEntries(t *testing.T) {
 			t.Fatalf("b.Reserve(%d): %v (%+v)", len(payload), err, b)
 		}
 		copy(w, payload)
-		fmt.Printf("[RPB] wrote %s: %+v\n", string(payload), b)
 		if err := b.Commit(len(payload)); err != nil {
 			t.Fatalf("b.Commit: %v", err)
 		}
@@ -201,5 +199,35 @@ func Test_Write1kEntries(t *testing.T) {
 
 	if got, want := actual.String(), expected.String(); got != want {
 		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func Test_WritesDontClobberReads(t *testing.T) {
+	b := bbuf.New(10)
+
+	payload := bytes.Repeat([]byte("a"), 7)
+	w, err := b.Reserve(len(payload))
+	if err != nil {
+		t.Fatalf("b.Reserve: %v", err)
+	}
+	copy(w, payload)
+	b.Commit(len(payload))
+
+	r := b.Read()
+
+	// We can't reserve this much space yet, it would need to invert & would clobber our live read
+	if _, err := b.Reserve(5); err == nil {
+		t.Fatalf("should not be able to reserve 5 bytes yet: %+v", b)
+	}
+
+	// For example, we might want to use our live read like this:
+	if got, want := r, payload; !bytes.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	b.Release(len(r))
+
+	// _Now_ we can reserve 5 bytes
+	if _, err := b.Reserve(5); err != nil {
+		t.Fatalf("b.Reserve: %v", err)
 	}
 }
