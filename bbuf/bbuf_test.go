@@ -2,7 +2,6 @@ package bbuf_test
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -13,13 +12,13 @@ import (
 func Test_ReadMyWrites(t *testing.T) {
 	b := bbuf.New(10)
 
-	w, err := b.Reserve(4)
-	if err != nil {
-		t.Fatalf("b.Reserve: %v", err)
+	w := b.Reserve(4)
+	if w == nil {
+		t.Fatal("b.Reserve returned nil")
 	}
-	copy(w, []byte("abcd"))
+	copy(w.Bytes, []byte("abcd"))
 
-	if err := b.Commit(4); err != nil {
+	if err := b.Commit(w); err != nil {
 		t.Fatalf("b.Commit: %v", err)
 	}
 
@@ -37,24 +36,27 @@ func Test_InterleavedReadsAndWrites(t *testing.T) {
 	b := bbuf.New(10)
 
 	// Write 4 bytes
-	w1, err := b.Reserve(4)
-	if err != nil {
-		t.Fatalf("b.Reserve: %v", err)
+	w1 := b.Reserve(4)
+	if w1 == nil {
+		t.Fatal("b.Reserve returned nil")
 	}
-	copy(w1, []byte("aaaa"))
-	if err := b.Commit(4); err != nil {
+	copy(w1.Bytes, []byte("aaaa"))
+	if err := b.Commit(w1); err != nil {
 		t.Fatalf("b.Commit: %v", err)
 	}
 
 	// Read 4 bytes, but don't release it yet
 	r1 := b.Read()
-
-	w2, err := b.Reserve(4)
-	if err != nil {
-		t.Fatalf("b.Reserve: %v", err)
+	if r1 == nil {
+		t.Fatal("b.Read returned nil")
 	}
-	copy(w2, []byte("bbbb"))
-	if err := b.Commit(4); err != nil {
+
+	w2 := b.Reserve(4)
+	if w2 == nil {
+		t.Fatal("b.Reserve returned nil")
+	}
+	copy(w2.Bytes, []byte("bbbb"))
+	if err := b.Commit(w2); err != nil {
 		t.Fatalf("b.Commit: %v", err)
 	}
 
@@ -80,12 +82,12 @@ func Test_Wraparound(t *testing.T) {
 	b := bbuf.New(10)
 
 	// Write & release 5 bytes
-	w1, err := b.Reserve(5)
-	if err != nil {
-		t.Fatalf("b.Reserve: %v", err)
+	w1 := b.Reserve(5)
+	if w1 == nil {
+		t.Fatalf("b.Reserve returned nil")
 	}
-	copy(w1, []byte("aaaaa"))
-	if err := b.Commit(4); err != nil {
+	copy(w1.Bytes, []byte("aaaaa"))
+	if err := b.Commit(w1); err != nil {
 		t.Fatalf("b.Commit: %v", err)
 	}
 	r1 := b.Read()
@@ -97,20 +99,20 @@ func Test_Wraparound(t *testing.T) {
 	}
 
 	// Now write 4 bytes, twice. That should wrap us around the end of the buffer.
-	w2, err := b.Reserve(4)
-	if err != nil {
-		t.Fatalf("b.Reserve: %v", err)
+	w2 := b.Reserve(4)
+	if w2 == nil {
+		t.Fatalf("b.Reserve returned nil")
 	}
-	copy(w2, []byte("bbbb"))
-	if err := b.Commit(4); err != nil {
+	copy(w2.Bytes, []byte("bbbb"))
+	if err := b.Commit(w2); err != nil {
 		t.Fatalf("b.Commit: %v", err)
 	}
-	w3, err := b.Reserve(4)
-	if err != nil {
-		t.Fatalf("b.Reserve: %v", err)
+	w3 := b.Reserve(4)
+	if w3 == nil {
+		t.Fatalf("b.Reserve returned nil")
 	}
-	copy(w3, []byte("cccc"))
-	if err := b.Commit(4); err != nil {
+	copy(w3.Bytes, []byte("cccc"))
+	if err := b.Commit(w3); err != nil {
 		t.Fatalf("b.Commit: %v", err)
 	}
 
@@ -136,18 +138,18 @@ func Test_OutOfSpace_EdgeCases(t *testing.T) {
 	b := bbuf.New(10)
 
 	// We don't allow completely filling the buffer
-	if _, err := b.Reserve(10); err == nil {
-		t.Fatalf("b.Reserve: expected err")
+	if w := b.Reserve(10); w != nil {
+		t.Fatalf("b.Reserve: expected nil, got %+v", w)
 	}
 
 	// 9/10 is allowed
-	w1, err := b.Reserve(9)
-	if err != nil {
-		t.Fatalf("b.Reserve: %v", err)
+	payload1 := bytes.Repeat([]byte("a"), 9)
+	w1 := b.Reserve(len(payload1))
+	if w1 == nil {
+		t.Fatalf("b.Reserve returned nil")
 	}
-	payload1 := bytes.Repeat([]byte("a"), len(w1))
-	copy(w1, payload1)
-	if err := b.Commit(len(w1)); err != nil {
+	copy(w1.Bytes, payload1)
+	if err := b.Commit(w1); err != nil {
 		t.Fatalf("b.Commit: %v", err)
 	}
 	r1 := b.Read()
@@ -157,13 +159,13 @@ func Test_OutOfSpace_EdgeCases(t *testing.T) {
 	b.Release(r1)
 
 	// But now the buffer is "split" and you can't write 9/10 again
-	if _, err := b.Reserve(9); err == nil {
-		t.Fatalf("b.Reserve: expected err")
+	if w := b.Reserve(9); w != nil {
+		t.Fatalf("b.Reserve: expected nil, got %+v", w)
 	}
 
 	// 8/10 is allowed
-	if _, err := b.Reserve(8); err != nil {
-		t.Fatalf("b.Reserve: %v", err)
+	if w := b.Reserve(8); w == nil {
+		t.Fatalf("b.Reserve: returned nil")
 	}
 }
 
@@ -188,16 +190,13 @@ func Test_Write1kEntries(t *testing.T) {
 		payload := []byte(fmt.Sprintf("payload-%d\n", prng.Int63()))
 		expected.Write(payload)
 
-		w, err := b.Reserve(len(payload))
-		if errors.Is(err, bbuf.ErrNotEnoughSpace) {
+		w := b.Reserve(len(payload))
+		if w == nil {
 			drain()
-			w, err = b.Reserve(len(payload))
+			w = b.Reserve(len(payload))
 		}
-		if err != nil {
-			t.Fatalf("b.Reserve(%d): %v (%+v)", len(payload), err, b)
-		}
-		copy(w, payload)
-		if err := b.Commit(len(payload)); err != nil {
+		copy(w.Bytes, payload)
+		if err := b.Commit(w); err != nil {
 			t.Fatalf("b.Commit: %v", err)
 		}
 	}
@@ -212,18 +211,18 @@ func Test_WritesDontClobberReads(t *testing.T) {
 	b := bbuf.New(10)
 
 	payload := bytes.Repeat([]byte("a"), 7)
-	w, err := b.Reserve(len(payload))
-	if err != nil {
-		t.Fatalf("b.Reserve: %v", err)
+	if w := b.Reserve(len(payload)); w == nil {
+		t.Fatalf("b.Reserve: returned nil")
+	} else {
+		copy(w.Bytes, payload)
+		b.Commit(w)
 	}
-	copy(w, payload)
-	b.Commit(len(payload))
 
 	r := b.Read()
 
 	// We can't reserve this much space yet, it would need to invert & would clobber our live read
-	if _, err := b.Reserve(5); err == nil {
-		t.Fatalf("should not be able to reserve 5 bytes yet: %+v", b)
+	if w := b.Reserve(5); w != nil {
+		t.Fatalf("b.Reserve: got %v, want nil", w)
 	}
 
 	// For example, we might want to use our live read like this:
@@ -233,8 +232,8 @@ func Test_WritesDontClobberReads(t *testing.T) {
 	b.Release(r)
 
 	// _Now_ we can reserve 5 bytes
-	if _, err := b.Reserve(5); err != nil {
-		t.Fatalf("b.Reserve: %v", err)
+	if w := b.Reserve(5); w == nil {
+		t.Fatalf("b.Reserve returned nil")
 	}
 }
 
@@ -242,9 +241,9 @@ func Test_ReadsDoNotSeeUncommittedWrites(t *testing.T) {
 	b := bbuf.New(10)
 
 	payload := bytes.Repeat([]byte("a"), 3)
-	w, err := b.Reserve(len(payload))
-	if err != nil {
-		t.Fatalf("b.Reserve: %v", err)
+	w := b.Reserve(len(payload))
+	if w == nil {
+		t.Fatalf("b.Reserve returned nil")
 	}
 
 	// The write hasn't even been performed yet, we don't want to see unitialized data
@@ -252,8 +251,8 @@ func Test_ReadsDoNotSeeUncommittedWrites(t *testing.T) {
 		t.Fatalf("b.Read should be nil, got %+v", r)
 	}
 
-	copy(w, payload)
-	b.Commit(len(payload))
+	copy(w.Bytes, payload)
+	b.Commit(w)
 
 	// Now that the write has been committed we can read it.
 	r := b.Read()

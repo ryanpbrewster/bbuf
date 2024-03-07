@@ -30,41 +30,42 @@ func New(sz int) *Buffer {
 
 var ErrNotEnoughSpace = fmt.Errorf("not enough space")
 
-func (b *Buffer) Reserve(sz int) ([]byte, error) {
+func (b *Buffer) Reserve(sz int) *Lease {
 	if b.write < b.read {
 		// We are inverted.
 		// We can't invert to get extra space, so we either have the capacity or we don't.
 		if b.write+sz < b.read {
 			// We have the space!
-			start := b.write
-			b.write += sz
-			return b.buf[start:b.write], nil
+			start, end := b.write, b.write+sz
+			return &Lease{Bytes: b.buf[start:end], end: end}
 		} else {
-			return nil, ErrNotEnoughSpace
+			return nil
 		}
 	} else {
 		// We are not inverted
 		// If we don't have enough space, we can try inverting to get extra.
 		if b.write+sz < len(b.buf) {
-			start := b.write
-			b.write += sz
+			start, end := b.write, b.write+sz
 			// We have the space!
-			return b.buf[start:b.write], nil
+			return &Lease{Bytes: b.buf[start:end], end: end}
 		} else if sz < b.read {
 			// We don't have space here, but we have enough at the start. Time to invert.
 			fmt.Printf("[RPB] inverting, end=%d\n", b.write)
-			b.watermark = b.write
-			b.write = sz
-			return b.buf[0:b.write], nil
+			start, end := 0, sz
+			return &Lease{Bytes: b.buf[start:end], end: end}
 		} else {
 			// No space anywhere
-			return nil, ErrNotEnoughSpace
+			return nil
 		}
 	}
 }
 
-func (b *Buffer) Commit(sz int) error {
-	// do nothing?
+func (b *Buffer) Commit(l *Lease) error {
+	if l.end < b.write {
+		// We must have inverted, record the watermark so that the reader knows where to stop
+		b.watermark = b.write
+	}
+	b.write = l.end
 	return nil
 }
 
