@@ -50,7 +50,6 @@ func (b *Buffer) Reserve(sz int) *Lease {
 			return &Lease{Bytes: b.buf[start:end], end: end}
 		} else if sz < b.read {
 			// We don't have space here, but we have enough at the start. Time to invert.
-			fmt.Printf("[RPB] inverting, end=%d\n", b.write)
 			start, end := 0, sz
 			return &Lease{Bytes: b.buf[start:end], end: end}
 		} else {
