@@ -2,9 +2,7 @@ package sink
 
 import (
 	"io"
-	"log"
 	"sync"
-	"sync/atomic"
 
 	"rpb.dev/bbufsink/bbuf"
 )
@@ -19,15 +17,9 @@ type Sink struct {
 	buf     *bbuf.Buffer
 	closed  bool
 
-	// done represents whether the bgloop is exited
-	done chan struct{}
-
-	// dirtyWrite indicates that a write has happened (used to eagerly trigger reads)
-	// It can only be closed while holding bufLock (to ensure it is only closed once)
-	dirtyWrite chan struct{}
-
-	// flushAttempts records how many times we've attempted to flush the buffer
-	flushAttempts conflatedInt64
+	pending chan struct{}
+	closing chan struct{}
+	done    chan struct{}
 }
 
 type config struct {
@@ -48,10 +40,12 @@ func New(inner io.Writer, opts ...Option) *Sink {
 	}
 
 	s := &Sink{
-		inner:      inner,
-		buf:        bbuf.New(cfg.capacity),
-		dirtyWrite: make(chan struct{}, 1),
-		done:       make(chan struct{}),
+		inner: inner,
+		buf:   bbuf.New(cfg.capacity),
+
+		pending: make(chan struct{}, 1),
+		closing: make(chan struct{}),
+		done:    make(chan struct{}),
 	}
 	go s.bgloop()
 	return s
@@ -64,16 +58,24 @@ func defaultConfig() *config {
 }
 
 func (s *Sink) bgloop() {
-	defer close(s.done)
-	for range s.dirtyWrite {
-		s.flush()
+	defer func() {
+		// By the time we exit here, the sink is closed. Once we acquire s.bufLock, we are guaranteed
+		// that it will never have any more data added to it.
+		if s.flush() {
+			s.flush()
+		}
+		s.buf = nil
+		close(s.done)
+	}()
+
+	for {
+		select {
+		case <-s.closing:
+			return
+		case <-s.pending:
+			s.flush()
+		}
 	}
-	// By the time we exit here, the sink is closed. Once we acquire s.bufLock, we are guaranteed
-	// that it will never have any more data added to it.
-	if s.flush() {
-		s.flush()
-	}
-	s.buf = nil
 }
 
 // Flush is only ever invoked by the `bgloop`, it has concurrency <= 1
@@ -91,19 +93,19 @@ func (s *Sink) flush() bool {
 
 func (s *Sink) Close() {
 	s.bufLock.Lock()
-	defer s.bufLock.Unlock()
 	if !s.closed {
 		s.closed = true
-		close(s.dirtyWrite)
+		close(s.closing)
 	}
+	s.bufLock.Unlock()
+	<-s.done
 }
 
 func (s *Sink) Sync() error {
 	// TODO: does this have to be 3?
 	for i := 0; i < 3; i++ {
-		// TODO: is it possible to avoid panicking if we call Close?
 		select {
-		case s.dirtyWrite <- struct{}{}:
+		case s.pending <- struct{}{}:
 		case <-s.done:
 			return nil
 		}
@@ -112,40 +114,34 @@ func (s *Sink) Sync() error {
 }
 
 func (s *Sink) Write(p []byte) (int, error) {
-	s.bufLock.Lock()
-	var l *bbuf.Lease
-	if !s.closed {
-		l = s.buf.Reserve(len(p))
-	} else {
-		log.Println("s.closed, skipping buffer")
-	}
-	if l != nil {
-		copy(l.Bytes, p)
-		s.buf.Commit(l)
-		select {
-		case s.dirtyWrite <- struct{}{}:
-		default:
-		}
-		s.bufLock.Unlock()
+	if s.tryBuffer(p) {
 		return len(p), nil
 	}
-
 	// If we get here, there isn't room in the buffer for the payload, so we're going to write it directly.
-	s.bufLock.Unlock()
 	return s.writeInner(p)
+}
+
+func (s *Sink) tryBuffer(p []byte) bool {
+	s.bufLock.Lock()
+	defer s.bufLock.Unlock()
+	if s.closed {
+		return false
+	}
+	l := s.buf.Reserve(len(p))
+	if l == nil {
+		return false
+	}
+	copy(l.Bytes, p)
+	s.buf.Commit(l)
+	select {
+	case s.pending <- struct{}{}:
+	default:
+	}
+	return true
 }
 
 func (s *Sink) writeInner(p []byte) (int, error) {
 	s.innerLock.Lock()
 	defer s.innerLock.Unlock()
 	return s.inner.Write(p)
-}
-
-type conflatedInt64 struct {
-	state atomic.Pointer[conflatedInt64State]
-}
-
-type conflatedInt64State struct {
-	cur   int64
-	dirty chan struct{}
 }
