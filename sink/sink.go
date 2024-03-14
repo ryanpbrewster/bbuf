@@ -17,9 +17,14 @@ type Sink struct {
 	buf     *bbuf.Buffer
 	closed  bool
 
+	// pending is a buffered channel used to indicate that there may be data pending in the buffer
+	// it is only ever read by s.bgloop()
 	pending chan struct{}
+	// closing is closed when s.Close() is invoked, and it represents that no more data will be be
+	// added to the buffer. s.bgloop() uses this as a signal to stop
 	closing chan struct{}
-	done    chan struct{}
+	// done is closed when s.bgloop() exits
+	done chan struct{}
 }
 
 type config struct {
@@ -102,7 +107,13 @@ func (s *Sink) Close() {
 }
 
 func (s *Sink) Sync() error {
-	// TODO: does this have to be 3?
+	// The worst case here is:
+	// a) s.pending is empty
+	// b) both buffer segments are populated
+	// In this case we'll need to trigger two flushes.
+	//   1. The first add does nothing
+	//   2. the second add waits until the in-progress flush is complete
+	//   3. the third padd waits until the next flush is complete
 	for i := 0; i < 3; i++ {
 		select {
 		case s.pending <- struct{}{}:
