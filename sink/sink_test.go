@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"rpb.dev/bbufsink/sink"
+	"rpb.dev/bbuf/sink"
 )
 
 func Test_Smoke(t *testing.T) {

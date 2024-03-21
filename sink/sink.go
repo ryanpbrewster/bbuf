@@ -4,7 +4,7 @@ import (
 	"io"
 	"sync"
 
-	"rpb.dev/bbufsink/bbuf"
+	"rpb.dev/bbuf"
 )
 
 type Sink struct {

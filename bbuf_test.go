@@ -6,7 +6,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"rpb.dev/bbufsink/bbuf"
+	"rpb.dev/bbuf"
 )
 
 func Test_ReadMyWrites(t *testing.T) {
