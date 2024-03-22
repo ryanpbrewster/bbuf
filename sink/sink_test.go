@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"rpb.dev/bbuf/sink"
+	"github.com/ryanpbrewster/bbuf/sink"
 )
 
 func Test_Smoke(t *testing.T) {

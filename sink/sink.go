@@ -5,7 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"rpb.dev/bbuf"
+	"github.com/ryanpbrewster/bbuf"
 )
 
 type Sink struct {
