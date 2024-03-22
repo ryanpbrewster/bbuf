@@ -13,6 +13,7 @@ import (
 func Test_Smoke(t *testing.T) {
 	inner := &testSink{}
 	s := sink.New(inner)
+	defer s.Close()
 
 	payload := []byte("hello")
 	s.Write(payload)
@@ -51,6 +52,7 @@ func Test_Batching(t *testing.T) {
 		end:   make(chan struct{}),
 	}
 	s := sink.New(inner)
+	defer s.Close()
 
 	// The first write will trigger an immedate flush. Wait for that to begin.
 	s.Write([]byte("aaa"))
@@ -76,12 +78,16 @@ func Test_Batching(t *testing.T) {
 func Test_OverflowDiscard_Works(t *testing.T) {
 	inner := &testSink{start: make(chan struct{})}
 	s := sink.New(inner, sink.WithOverflow(sink.Discard), sink.WithCapacity(16))
+	defer s.Close()
+	defer close(inner.start)
 
 	// Fill the buffer
 	s.Write(bytes.Repeat([]byte("a"), 12))
 	// Any subsequent writes will be discarded, without blocking
-	n, _ := s.Write(bytes.Repeat([]byte("a"), 12))
-	if got, want := n, 0; got != want {
+	for i := 0; i < 10; i++ {
+		s.Write(bytes.Repeat([]byte("a"), 12))
+	}
+	if got, want := s.NumOverflows(), uint64(10); got != want {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
@@ -115,12 +121,14 @@ func (t *testSink) Write(p []byte) (int, error) {
 }
 
 type benchSink struct {
-	count int
+	writes     int
+	totalBytes uint64
 }
 
 func (b *benchSink) Write(p []byte) (n int, err error) {
 	time.Sleep(1 * time.Millisecond)
-	b.count += len(p)
+	b.writes++
+	b.totalBytes += uint64(len(p))
 	return len(p), nil
 }
 
@@ -136,8 +144,11 @@ func Benchmark_OverflowDiscard(b *testing.B) {
 func benchmarkOverflow(b *testing.B, behavior sink.OverflowBehavior) {
 	inner := &benchSink{}
 	s := sink.New(inner, sink.WithOverflow(behavior))
+	defer s.Close()
 
 	payload := bytes.Repeat([]byte("a"), 1024)
+	size := uint64(len(payload))
+
 	for i := 0; i < b.N; i++ {
 		s.Write(payload)
 	}
@@ -145,12 +156,12 @@ func benchmarkOverflow(b *testing.B, behavior sink.OverflowBehavior) {
 
 	switch behavior {
 	case sink.Flush:
-		if got, want := inner.count, len(payload)*b.N; got != want {
+		if got, want := inner.totalBytes, size*uint64(b.N); got != want {
 			b.Fatalf("got %v, want %v", got, want)
 		}
 	case sink.Discard:
-		if got, max := inner.count, len(payload)*b.N; got > max {
-			b.Fatalf("got %v, want <= %v", got, max)
+		if got, want := inner.totalBytes, size*(uint64(b.N)-s.NumOverflows()); got != want {
+			b.Fatalf("got %v, want %v [b.N=%v, overflows=%v]", got, want, b.N, s.NumOverflows())
 		}
 	}
 }
