@@ -8,6 +8,8 @@ import (
 )
 
 type Sink struct {
+	cfg config
+
 	// inner must only be accessed while holding innerLock
 	innerLock sync.Mutex
 	inner     io.Writer
@@ -29,7 +31,24 @@ type Sink struct {
 
 type config struct {
 	capacity int
+	behavior OverflowBehavior
 }
+
+// OverflowBehavior describes what should happen if
+// a write happens and the bbuf.Buffer does not have
+// any capacity available. The default behavios is Flush.
+type OverflowBehavior string
+
+const (
+	// Flush means that if there isn't any capacity
+	// the caller should directly grab the inner writer
+	// and flush the payload
+	Flush OverflowBehavior = "flush"
+	// Discard means that if there isn't any capacity
+	// the payload is discarded
+	Discard OverflowBehavior = "discard"
+)
+
 type Option func(*config)
 
 func WithCapacity(capacity int) Option {
@@ -38,13 +57,24 @@ func WithCapacity(capacity int) Option {
 	}
 }
 
+func WithOverflow(behavior OverflowBehavior) Option {
+	return func(c *config) {
+		c.behavior = behavior
+	}
+}
+
 func New(inner io.Writer, opts ...Option) *Sink {
-	cfg := defaultConfig()
+	cfg := config{
+		capacity: 256 << 10,
+		behavior: Flush,
+	}
 	for _, opt := range opts {
-		opt(cfg)
+		opt(&cfg)
 	}
 
 	s := &Sink{
+		cfg: cfg,
+
 		inner: inner,
 		buf:   bbuf.New(cfg.capacity),
 
@@ -54,12 +84,6 @@ func New(inner io.Writer, opts ...Option) *Sink {
 	}
 	go s.bgloop()
 	return s
-}
-
-func defaultConfig() *config {
-	return &config{
-		capacity: 256 << 10,
-	}
 }
 
 func (s *Sink) bgloop() {
@@ -128,8 +152,15 @@ func (s *Sink) Write(p []byte) (int, error) {
 	if s.tryBuffer(p) {
 		return len(p), nil
 	}
-	// If we get here, there isn't room in the buffer for the payload, so we're going to write it directly.
+	// If we get here, there isn't room in the buffer for the payload.
+	switch s.cfg.behavior {
+	case Discard:
+		return 0, nil
+
+	case Flush:
+	}
 	return s.writeInner(p)
+
 }
 
 func (s *Sink) tryBuffer(p []byte) bool {

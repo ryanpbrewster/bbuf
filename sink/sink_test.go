@@ -1,9 +1,11 @@
 package sink_test
 
 import (
+	"bytes"
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"rpb.dev/bbuf/sink"
 )
@@ -71,6 +73,19 @@ func Test_Batching(t *testing.T) {
 	}
 }
 
+func Test_OverflowDiscard_Works(t *testing.T) {
+	inner := &testSink{start: make(chan struct{})}
+	s := sink.New(inner, sink.WithOverflow(sink.Discard), sink.WithCapacity(16))
+
+	// Fill the buffer
+	s.Write(bytes.Repeat([]byte("a"), 12))
+	// Any subsequent writes will be discarded, without blocking
+	n, _ := s.Write(bytes.Repeat([]byte("a"), 12))
+	if got, want := n, 0; got != want {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
 type testSink struct {
 	lock     sync.Mutex
 	payloads [][]byte
@@ -97,4 +112,45 @@ func (t *testSink) Write(p []byte) (int, error) {
 		<-t.end
 	}
 	return len(p), nil
+}
+
+type benchSink struct {
+	count int
+}
+
+func (b *benchSink) Write(p []byte) (n int, err error) {
+	time.Sleep(1 * time.Millisecond)
+	b.count += len(p)
+	return len(p), nil
+}
+
+func Benchmark_OverflowFlush(b *testing.B) {
+	benchmarkOverflow(b, sink.Flush)
+}
+func Benchmark_OverflowDiscard(b *testing.B) {
+	benchmarkOverflow(b, sink.Discard)
+}
+
+// Benchmark_OverflowFlush-10                 696056             15658.00 ns/op
+// Benchmark_OverflowDiscard-10            856555224                13.92 ns/op
+func benchmarkOverflow(b *testing.B, behavior sink.OverflowBehavior) {
+	inner := &benchSink{}
+	s := sink.New(inner, sink.WithOverflow(behavior))
+
+	payload := bytes.Repeat([]byte("a"), 1024)
+	for i := 0; i < b.N; i++ {
+		s.Write(payload)
+	}
+	s.Sync()
+
+	switch behavior {
+	case sink.Flush:
+		if got, want := inner.count, len(payload)*b.N; got != want {
+			b.Fatalf("got %v, want %v", got, want)
+		}
+	case sink.Discard:
+		if got, max := inner.count, len(payload)*b.N; got > max {
+			b.Fatalf("got %v, want <= %v", got, max)
+		}
+	}
 }
