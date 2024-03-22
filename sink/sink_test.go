@@ -132,6 +132,15 @@ func (b *benchSink) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
+func Benchmark_Baseline(b *testing.B) {
+	b.ReportAllocs()
+	inner := &benchSink{}
+	payload := bytes.Repeat([]byte("a"), 1024)
+	for i := 0; i < b.N; i++ {
+		inner.Write(payload)
+	}
+}
+
 func Benchmark_OverflowFlush(b *testing.B) {
 	benchmarkOverflow(b, sink.Flush)
 }
@@ -139,8 +148,9 @@ func Benchmark_OverflowDiscard(b *testing.B) {
 	benchmarkOverflow(b, sink.Discard)
 }
 
-// Benchmark_OverflowFlush-10                 139120             18164.00 ns/op              33 B/op          0 allocs/op
-// Benchmark_OverflowDiscard-10            160529864                14.92 ns/op               0 B/op          0 allocs/op
+// Benchmark_Baseline-10                        2054           1212308.00 ns/op            0 B/op          0 allocs/op
+// Benchmark_OverflowFlush-10                 146078             17705.00 ns/op           33 B/op          0 allocs/op
+// Benchmark_OverflowDiscard-10            163520164                14.59 ns/op            0 B/op          0 allocs/op
 
 func benchmarkOverflow(b *testing.B, behavior sink.OverflowBehavior) {
 	b.ReportAllocs()
