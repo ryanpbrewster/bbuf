@@ -139,9 +139,12 @@ func Benchmark_OverflowDiscard(b *testing.B) {
 	benchmarkOverflow(b, sink.Discard)
 }
 
-// Benchmark_OverflowFlush-10                 696056             15658.00 ns/op
-// Benchmark_OverflowDiscard-10            856555224                13.92 ns/op
+// Benchmark_OverflowFlush-10                 139120             18164.00 ns/op              33 B/op          0 allocs/op
+// Benchmark_OverflowDiscard-10            160529864                14.92 ns/op               0 B/op          0 allocs/op
+
 func benchmarkOverflow(b *testing.B, behavior sink.OverflowBehavior) {
+	b.ReportAllocs()
+
 	inner := &benchSink{}
 	s := sink.New(inner, sink.WithOverflow(behavior))
 	defer s.Close()
