@@ -95,6 +95,9 @@ func (b *Buffer) Release(r *Lease) error {
 	if r.end == b.write {
 		b.read, b.write = 0, 0
 	} else if r.end == b.watermark {
+		// This is an optimization. If we know that the writer has already inverted,
+		// and that there's no data left for us to read on this end, we'll proactively
+		// reset to the beginning.
 		b.read = 0
 	} else {
 		b.read = r.end

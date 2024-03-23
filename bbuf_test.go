@@ -287,3 +287,17 @@ func Test_ReadsDoNotSeeUncommittedWrites(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
+
+func Test_OutstandingReservations_AreRespected(t *testing.T) {
+	b := bbuf.New(10)
+
+	b.Commit(b.Reserve(3))
+	w := b.Reserve(3)
+	b.Release(b.Read())
+	b.Commit(w)
+
+	r := b.Read()
+	if got, want := len(r.Bytes), 3; got != want {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
