@@ -94,6 +94,8 @@ func (b *Buffer) Read() *Lease {
 func (b *Buffer) Release(r *Lease) error {
 	if r.end == b.write {
 		b.read, b.write = 0, 0
+	} else if r.end == b.watermark {
+		b.read = 0
 	} else {
 		b.read = r.end
 	}
