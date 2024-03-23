@@ -18,18 +18,14 @@ func Test_ReadMyWrites(t *testing.T) {
 	}
 	copy(w.Bytes, []byte("abcd"))
 
-	if err := b.Commit(w); err != nil {
-		t.Fatalf("b.Commit: %v", err)
-	}
+	b.Commit(w)
 
 	r := b.Read()
 	if got, want := r.Bytes, "abcd"; !bytes.Equal(got, []byte(want)) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 
-	if err := b.Release(r); err != nil {
-		t.Fatalf("b.Release: %v", err)
-	}
+	b.Release(r)
 }
 
 func Test_InterleavedReadsAndWrites(t *testing.T) {
@@ -41,9 +37,7 @@ func Test_InterleavedReadsAndWrites(t *testing.T) {
 		t.Fatal("b.Reserve returned nil")
 	}
 	copy(w1.Bytes, []byte("aaaa"))
-	if err := b.Commit(w1); err != nil {
-		t.Fatalf("b.Commit: %v", err)
-	}
+	b.Commit(w1)
 
 	// Read 4 bytes, but don't release it yet
 	r1 := b.Read()
@@ -56,26 +50,20 @@ func Test_InterleavedReadsAndWrites(t *testing.T) {
 		t.Fatal("b.Reserve returned nil")
 	}
 	copy(w2.Bytes, []byte("bbbb"))
-	if err := b.Commit(w2); err != nil {
-		t.Fatalf("b.Commit: %v", err)
-	}
+	b.Commit(w2)
 
 	// Now check r1 after we're written new data. It should still be valid.
 	if got, want := r1.Bytes, []byte("aaaa"); !bytes.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	if err := b.Release(r1); err != nil {
-		t.Fatalf("b.Release: %v", err)
-	}
+	b.Release(r1)
 
 	// And another read should see "bbbb"
 	r2 := b.Read()
 	if got, want := r2.Bytes, []byte("bbbb"); !bytes.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	if err := b.Release(r2); err != nil {
-		t.Fatalf("b.Release: %v", err)
-	}
+	b.Release(r2)
 }
 
 func Test_Wraparound_SplitsReads(t *testing.T) {
@@ -115,17 +103,13 @@ func Test_Wraparound_SplitsReads(t *testing.T) {
 	if got, want := r2.Bytes, []byte("bbbb"); !bytes.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	if err := b.Release(r2); err != nil {
-		t.Fatalf("b.Release: %v", err)
-	}
+	b.Release(r2)
 
 	r3 := b.Read()
 	if got, want := r3.Bytes, []byte("cccc"); !bytes.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	if err := b.Release(r3); err != nil {
-		t.Fatalf("b.Release: %v", err)
-	}
+	b.Release(r3)
 }
 
 func Test_OutOfSpace_EdgeCases(t *testing.T) {
@@ -143,9 +127,7 @@ func Test_OutOfSpace_EdgeCases(t *testing.T) {
 		t.Fatalf("b.Reserve returned nil")
 	}
 	copy(w1.Bytes, payload1)
-	if err := b.Commit(w1); err != nil {
-		t.Fatalf("b.Commit: %v", err)
-	}
+	b.Commit(w1)
 	r1 := b.Read()
 	if got, want := r1.Bytes, payload1; !bytes.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
@@ -223,9 +205,7 @@ func Test_Write1kEntries(t *testing.T) {
 			w = b.Reserve(len(payload))
 		}
 		copy(w.Bytes, payload)
-		if err := b.Commit(w); err != nil {
-			t.Fatalf("b.Commit: %v", err)
-		}
+		b.Commit(w)
 	}
 	drain()
 
@@ -298,6 +278,27 @@ func Test_OutstandingReservations_AreRespected(t *testing.T) {
 
 	r := b.Read()
 	if got, want := len(r.Bytes), 3; got != want {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func Test_ReaderRespectsWatermarks(t *testing.T) {
+	// In this test we're going to check that the reader
+	// respects the watermark left by a writer on inversion.
+	b := bbuf.New(10)
+
+	// Wrangle the buffer so that read=6, write=6
+	b.Commit(b.Reserve(6))
+	w := b.Reserve(1)
+	b.Release(b.Read())
+	b.Rollback(w)
+
+	// Now trigger an inverted write
+	b.Commit(b.Reserve(5))
+
+	// A read should see that write!
+	r := b.Read()
+	if got, want := len(r.Bytes), 5; got != want {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
