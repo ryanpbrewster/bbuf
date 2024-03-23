@@ -71,8 +71,14 @@ func (b *Buffer) Commit(l *Lease) {
 		panic("commit without a write lease")
 	}
 	if l.end < b.write {
-		// We must have inverted, record the watermark so that the reader knows where to stop
-		b.watermark = b.write
+		// We must have inverted
+		if b.read < b.write {
+			// If the reader has data left to read, record a watermark so it knows where to stop
+			b.watermark = b.write
+		} else {
+			// Otherwise, reset it to the start so it starts reading from the right location
+			b.read = 0
+		}
 	}
 	b.write = l.end
 	b.writing = 0
@@ -92,14 +98,8 @@ type Lease struct {
 func (b *Buffer) Read() *Lease {
 	start, end := b.read, b.write
 	if b.write < b.read {
-		// We are inverted.
-		if start < b.watermark {
-			// If there is data available, we should read until b.watermark
-			end = b.watermark
-		} else {
-			// If there's no data, skip to reading from the front of the buf
-			start = 0
-		}
+		// We are inverted, so stop at the watermark
+		end = b.watermark
 	}
 	if start == end {
 		return nil
